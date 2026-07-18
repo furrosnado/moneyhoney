@@ -1198,6 +1198,7 @@ function qlParcOpts(max){let o='';for(let i=1;i<=max;i++)o+=`<option value="${i}
 function openQuickAdd(anchor){
   closeQuickAdd();closeCeTray();closeSpTray();closeItemTray();closeTabsTray();
   const mk=S.activeMonth,m=S.months[mk];
+  const pAt=projAtivos();
   const gIn=m.groups.filter(g=>g.type==='in').map(g=>`<option value="g:${g.id}">${esc(accName(g.acc))} · ${esc(g.name)}</option>`).join('');
   const gOut=m.groups.filter(g=>g.type==='out').map(g=>`<option value="g:${g.id}">${esc(accName(g.acc))} · ${esc(g.name)}</option>`).join('');
   const cOpts=S.cards.map(c=>`<option value="c:${c.id}">${esc(c.name)}</option>`).join('');
@@ -1219,6 +1220,13 @@ function openQuickAdd(anchor){
       </select>
       <input type="number" min="1" max="31" data-ql="day" placeholder="Dia" title="dia do mês (opcional)">
     </div>
+    <div class="qtrow" data-ql="projrow">
+      <select data-ql="proj" title="projeto (bloco de gasto): o item soma no total dele; entrada vinculada abate (reembolso)">
+        <option value="">— Sem projeto</option>
+        ${pAt.map(p=>`<option value="${p.id}" ${S.focusProj===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
+        <option value="__new">＋ Novo projeto…</option>
+      </select>
+    </div>
     <div data-ql="parcwrap">
       <select data-ql="parc">${qlParcOpts(24)}</select>
       <div class="qlhint hid" data-ql="hint">marque a bandeira do cartão na aba Cartões pra parcelar</div>
@@ -1233,10 +1241,13 @@ function openQuickAdd(anchor){
 
   const destSel=t.querySelector('[data-ql="dest"]'),parcSel=t.querySelector('[data-ql="parc"]'),
         parcWrap=t.querySelector('[data-ql="parcwrap"]'),dayRow=t.querySelector('[data-ql="dayrow"]'),
+        projRow=t.querySelector('[data-ql="projrow"]'),
         hintEl=t.querySelector('[data-ql="hint"]'),valInp=t.querySelector('[data-ql="val"]');
 
   function updateForParc(){
-    dayRow.classList.toggle('hid',+parcSel.value>1); // dia não se aplica a parcelamento — é recorrência mensal, não data única
+    const hide=+parcSel.value>1; // parcelamento vira dívida (S.debts) — não tem dia nem projeto, mesma lei do item automático
+    dayRow.classList.toggle('hid',hide);
+    projRow.classList.toggle('hid',hide);
   }
   function updateForDest(){
     const v=destSel.value;
@@ -1266,6 +1277,13 @@ function openQuickAdd(anchor){
       ev.target.insertBefore(o,ev.target.querySelector('option[value="__new"]'));}
     else ev.target.value='';
   });
+  t.querySelector('[data-ql="proj"]').addEventListener('change',ev=>{
+    if(ev.target.value!=='__new')return;
+    const p=askNewProj();
+    if(p){const o=document.createElement('option');o.value=p.id;o.textContent=p.name;
+      ev.target.insertBefore(o,ev.target.querySelector('option[value="__new"]'));ev.target.value=p.id;}
+    else ev.target.value='';
+  });
 
   t.addEventListener('click',ev=>{
     if(ev.target.closest('select,input'))return; // não fecha nem age no meio de um gesto de picker
@@ -1278,6 +1296,8 @@ function openQuickAdd(anchor){
     const destV=destSel.value,cat=t.querySelector('[data-ql="cat"]').value||undefined;
     const nParc=+parcSel.value||1;
     const day=dayRow.classList.contains('hid')?null:sanitizeDay(dayInp.value);
+    // projeto: some junto com o dia quando parcela (dívida não tem vínculo); "__new" já foi resolvido pro id real no change acima
+    const projId=projRow.classList.contains('hid')?null:(t.querySelector('[data-ql="proj"]').value||null);
 
     if(destV.startsWith('c:')){
       const cd=S.cards.find(c=>c.id===destV.slice(2));if(!cd)return;
@@ -1286,7 +1306,7 @@ function openQuickAdd(anchor){
       }else{
         const x={id:uid(),cardId:cd.id,label:desc,val,cat};
         if(day)x.d=day;
-        if(S.focusProj&&projAtivos().some(p=>p.id===S.focusProj)){x.proj=S.focusProj;projReach(projById(S.focusProj),mk);}
+        if(projId){x.proj=projId;projReach(projById(projId),mk);}
         ce(mk).push(x);syncCardItems(mk);
       }
     }else{
@@ -1296,7 +1316,7 @@ function openQuickAdd(anchor){
       }else{
         const it={id:uid(),g:g.id,label:desc,val,recurring:false,paid:false,person:'',tags:[],cat};
         if(day)it.d=day;
-        if(g.type==='out'&&S.focusProj&&projAtivos().some(p=>p.id===S.focusProj)){it.proj=S.focusProj;projReach(projById(S.focusProj),mk);}
+        if(projId){it.proj=projId;projReach(projById(projId),mk);}
         m.items.push(it);
       }
     }
@@ -1819,7 +1839,8 @@ const qm=k=>`<button class="qmark" data-act="notetog" data-key="${k}" title="com
 const note=(k,txt)=>`<div class="note ${openNotes.has(k)?'':'hid'}">${txt}</div>`;
 function renderDash(){
   const keys=monthKeys(),tk=todayKey();
-  const curK=S.months[tk]?tk:keys[keys.length-1];
+  const nowK=S.months[tk]?tk:keys[keys.length-1]; // mês real de hoje — só onde não deve seguir a navegação (Fixos, A receber)
+  const curK=S.months[S.activeMonth]?S.activeMonth:nowK; // mês exibido na dashboard — segue o mês ativo (mesmo da aba Mês)
   const cIdx=Math.max(0,keys.indexOf(curK));
   const flows=keys.map(k=>({k,f:monthFlow(k),c:calcMonth(k)}));
   const last=flows[cIdx];
@@ -1830,9 +1851,9 @@ function renderDash(){
   const histStart=dashHist?0:Math.max(0,cIdx-6); // janela: últimos 6 meses + atual; antigos e futuros sob demanda
   const winEvo=flows.slice(histStart,dashProj?flows.length:cIdx+1);
 
-  // pessoas: itens de entrada não recebidos, até o mês atual (futuro projetado não é dívida de ninguém)
+  // pessoas: itens de entrada não recebidos, até o mês real de hoje (futuro projetado não é dívida de ninguém; não segue a navegação)
   const pess={};
-  for(const k of keys){if(monthIdx(k)>monthIdx(curK))break;const m=S.months[k];
+  for(const k of keys){if(monthIdx(k)>monthIdx(nowK))break;const m=S.months[k];
     for(const gr of m.groups){if(gr.type!=='in')continue;
       for(const it of m.items){if(it.g!==gr.id||it.paid||!it.person)continue;
         pess[it.person]=(pess[it.person]||0)+it.val;}}}
@@ -1878,7 +1899,7 @@ function renderDash(){
     return ` <i class="rate" style="color:${pct>0?'var(--neg)':'var(--pos)'}">${pct>0?'↑':'↓'}${Math.abs(pct)}%</i>`;
   };
 
-  // cartões e dívidas do mês atual — gastos, estornos e parcelas separados (avulso pode ser negativo)
+  // cartões e dívidas do mês exibido (curK, segue a navegação) — gastos, estornos e parcelas separados (avulso pode ser negativo)
   const csum=S.cards.map(c=>{
     const gastos=cardGastos(curK,c.id),est=cardEstorno(curK,c.id),par=cardParcelas(curK,c);
     return{c,gastos,est,par,fat:gastos-est+par};
@@ -1893,13 +1914,13 @@ function renderDash(){
   const commitMes=S.debts.filter(d=>(d.total-d.pagas)>0&&d.parcela>0).reduce((s,d)=>s+d.parcela,0);
   const maxRemD=Math.max(0,...S.debts.map(d=>d.parcela>0?(d.total-d.pagas):0));
   const livreDiv=maxRemD>0?mshort(addM(tk,maxRemD-1)):null;
-  // pendências do mês atual (o que ainda falta acontecer)
+  // pendências do mês exibido (o que ainda falta acontecer, curK segue a navegação)
   let pendOut=0,pendOutN=0,pendIn=0,pendInN=0;
   {const m=S.months[curK];const gtype={};for(const g of m.groups)gtype[g.id]=g.type;
    for(const it of m.items){if(it.paid)continue;const t=gtype[it.g];
      if(t==='out'){pendOut+=it.val;pendOutN++;}else if(t==='in'){pendIn+=it.val;pendInN++;}}}
   const pendT=(S.months[curK].transfers||[]).filter(t=>!t.done).length;
-  // não rastreado do mês atual (real informado vs projetado)
+  // não rastreado do mês exibido (real informado vs projetado; curK segue a navegação)
   let untNow=0,hasRealNow=false;
   {const m=S.months[curK];for(const a of S.accounts){
     if(m.real&&typeof m.real[a.id]==='number'){hasRealNow=true;untNow+=m.real[a.id]-last.c.per[a.id].close;}}}
@@ -1907,7 +1928,7 @@ function renderDash(){
   view.innerHTML=`
   <div class="grid dashgrid ${pjAct.length?'hasproj':''}">
   <div class="card full c-agora" style="background:var(--cardhi)">
-    <div class="chead"><span class="chead-t hi">AGORA · ${mlabel(curK).toUpperCase()}</span>${qm('kpi')}</div>
+    <div class="chead"><span class="chead-t hi">${curK===nowK?'AGORA · ':''}${mlabel(curK).toUpperCase()}</span>${qm('kpi')}</div>
     ${hasRealNow&&Math.abs(untNow)>1?`<div class="alert" data-act="dashtable" style="cursor:pointer;margin-bottom:16px" title="abrir o detalhe por conta">⚠ R$ ${fmt(Math.abs(untNow))} fora do radar — o saldo real informado difere do projetado. Toque pra ver por conta.</div>`:''}
     <div class="kpis">
       <div class="kcluster">
@@ -1928,7 +1949,7 @@ function renderDash(){
       ${pendInN?`<span class="kchip in">Falta entrar R$ ${fmt(pendIn)} · ${pendInN} ${pendInN===1?'item':'itens'}</span>`:''}
       ${pendT?`<span class="kchip tr">${pendT} transferência${pendT>1?'s':''} pendente${pendT>1?'s':''}</span>`:''}
     </div>`:''}
-    ${note('kpi','"Sem caixa" = somando só as contas principais — as marcadas com o botão CAIXA (dinheiro vivo) ficam de fora. Fecha o mês = como o mês atual termina se tudo se confirmar. Guardado = fechamento − abertura; a % divide pelas entradas. Compromisso/mês = soma das parcelas de dívidas ativas; "livre de dívidas em" = quando a última acaba. Os chips mostram o que ainda não aconteceu no mês (itens sem ✓ e transferências pendentes).')}
+    ${note('kpi','"Sem caixa" = somando só as contas principais — as marcadas com o botão CAIXA (dinheiro vivo) ficam de fora. Fecha o mês = como o mês em exibição termina se tudo se confirmar. Guardado = fechamento − abertura; a % divide pelas entradas. Compromisso/mês = soma das parcelas de dívidas ativas; "livre de dívidas em" = quando a última acaba. Os chips mostram o que ainda não aconteceu no mês (itens sem ✓ e transferências pendentes).')}
   </div>
 
   <div class="card full c-evo">
@@ -1959,8 +1980,8 @@ function renderDash(){
     </table></div>`)(matchMedia('(max-width:560px)').matches):''}
   </div>
 
-  ${(()=>{ // FIXOS DO MÊS — compromissos recorrentes do mês atual + gerenciamento inline
-    const mc=S.months[curK],gt={};for(const g of mc.groups)gt[g.id]=g.type;
+  ${(()=>{ // FIXOS DO MÊS — compromissos recorrentes do mês REAL de hoje (nowK, não segue a navegação) + gerenciamento inline
+    const mc=S.months[nowK],gt={};for(const g of mc.groups)gt[g.id]=g.type;
     const recIn=mc.items.filter(i=>i.recurring&&!i.cardId&&!i.debtId&&gt[i.g]==='in');
     const recOutItems=mc.items.filter(i=>i.recurring&&!i.cardId&&!i.debtId&&gt[i.g]==='out');
     const recCard=(mc.cardExp||[]).filter(x=>x.rec&&!x.est); // gasto avulso de cartão marcado como recorrente → despesa fixa
@@ -1969,11 +1990,11 @@ function renderDash(){
     const sOut=recOutItems.reduce((s,i)=>s+i.val,0)+recCard.reduce((s,x)=>s+x.val,0);
     const sParc=parc.reduce((s,d)=>s+d.parcela,0);
     const totOut=sOut+sParc;
-    const mrow=(i,tp)=>`<div class="fxrow"><button class="fxlead" data-act="fixpaid" data-id="${i.id}" title="${i.paid?(tp==='in'?'recebido':'pago'):'marcar como '+(tp==='in'?'recebido':'pago')}"><span class="fxchk ${i.paid?'on':''}"></span></button><span class="fxname" title="${esc(i.label)}">${esc(i.label)}</span><span class="fxv ${tp==='in'?'recv':'pay'}">${fmtc(i.val)}</span><button class="ic rec on" data-act="fixstop" data-id="${i.id}" title="recorrente — clique pra parar a partir de ${mshort(curK)} (meses passados não mudam)">↻</button></div>`;
+    const mrow=(i,tp)=>`<div class="fxrow"><button class="fxlead" data-act="fixpaid" data-id="${i.id}" title="${i.paid?(tp==='in'?'recebido':'pago'):'marcar como '+(tp==='in'?'recebido':'pago')}"><span class="fxchk ${i.paid?'on':''}"></span></button><span class="fxname" title="${esc(i.label)}">${esc(i.label)}</span><span class="fxv ${tp==='in'?'recv':'pay'}">${fmtc(i.val)}</span><button class="ic rec on" data-act="fixstop" data-id="${i.id}" title="recorrente — clique pra parar a partir de ${mshort(nowK)} (meses passados não mudam)">↻</button></div>`;
     const rorow=(dot,name,val,ttl)=>`<div class="fxrow ro" title="${esc(ttl)}"><span class="fxlead"><span class="tddot" style="background:${dot}"></span></span><span class="fxname">${esc(name)}</span><span class="fxv pay">${fmtc(val)}</span><span class="fxtrail"></span></div>`;
     const despesas=recOutItems.map(i=>mrow(i,'out')).join('')+recCard.map(x=>{const cd=S.cards.find(c=>c.id===x.cardId);return rorow(cd?brandColor(cd.brand):'var(--dim)',x.label,x.val,'gasto recorrente no cartão — gerenciar na aba Cartões');}).join('');
     return `<div class="card full c-fix">
-    <div class="chead"><span class="chead-t">FIXOS DO MÊS · ${mlabel(curK).toUpperCase()}</span>${qm('fix')}</div>
+    <div class="chead"><span class="chead-t">FIXOS DO MÊS · ${mlabel(nowK).toUpperCase()}</span>${qm('fix')}</div>
     ${note('fix','Todo gasto marcado como recorrente (↻) entra em Despesas fixas — itens de saída (geríveis aqui: o círculo marca pago/recebido; o ↻ é a recorrência, clique pra parar do mês atual em diante, meses passados intactos) e gastos avulsos de cartão recorrentes (o ponto mostra a bandeira; geridos na aba Cartões). Entradas fixas = recebimentos recorrentes. Parcelas de dívida na 3ª coluna (geridas na aba Dívidas; ponto = bandeira quando é no cartão).')}
     <div class="fxcols">
       <div class="fxcol">
@@ -2036,7 +2057,7 @@ function renderDash(){
 
   <div class="card c-cat">
     <div class="chead"><span class="chead-t">SAÍDAS POR CATEGORIA</span>${qm('cat')}</div>
-    ${note('cat','Mês atual: itens de saída + gastos de cartão (líquidos de estorno) + parcelas de dívidas — faturas vinculadas ficam de fora pra não contar duas vezes. A faixa de cima mostra a fatia de cada categoria no total; linhas com "+" são categorias com estorno maior que gasto. A setinha compara com o mês anterior.')}
+    ${note('cat','Neste mês: itens de saída + gastos de cartão (líquidos de estorno) + parcelas de dívidas — faturas vinculadas ficam de fora pra não contar duas vezes. A faixa de cima mostra a fatia de cada categoria no total; linhas com "+" são categorias com estorno maior que gasto. A setinha compara com o mês anterior.')}
     ${(ckeys.length||pjFocus)?(()=>{
       const pos=ckeys.filter(k2=>cats[k2]>0);
       const compbar=catTot>0?`<div class="compbar" title="fatia de cada categoria no total de saídas">${pos.map(k2=>`<span style="width:${(cats[k2]/catTot*100).toFixed(2)}%;background:${catColor(k2)}"></span>`).join('')}</div>`:'';
@@ -2045,7 +2066,7 @@ function renderDash(){
       const shown=foco?[foco]:ckeys;
       const allKeys=Object.keys(catsAll).filter(k2=>Math.abs(catsAll[k2])>0.004).sort((a,b)=>catsAll[b]-catsAll[a]); // opções estáveis mesmo com filtro de projeto ativo
       const filtro=`<select class="catsel dcat" data-act="dashcatfocus" style="margin-bottom:12px;max-width:none;width:100%"><option value="">Todas as categorias</option>${allKeys.map(k2=>`<option value="${esc(k2)}" ${k2===foco?'selected':''}>${esc(k2)}</option>`).join('')}${pjAct.length?`<optgroup label="Projetos — em quê gastou">${pjAct.map(p=>`<option value="proj:${p.id}" ${pjFocus===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</optgroup>`:''}</select>`;
-      return filtro+compbar+(ckeys.length?'':'<div class="empty">Nada vinculado a este projeto no mês atual.</div>')+`<div class="bars dashscroll">${shown.map(k2=>{
+      return filtro+compbar+(ckeys.length?'':'<div class="empty">Nada vinculado a este projeto neste mês.</div>')+`<div class="bars dashscroll">${shown.map(k2=>{
         const v=cats[k2];const pct=catTot>0&&v>0?Math.round(v/catTot*100):null;
         return `<div class="srow">
           <div class="sr1"><span class="sw" style="background:${v<0?'var(--pos)':catColor(k2)}"></span><span class="bm2" title="${esc(k2)}">${esc(k2)}</span><span class="bv2v"${v<0?' style="color:var(--pos)"':''}>${v<0?'+ ':''}R$ ${fmt(Math.abs(v))}</span></div>
