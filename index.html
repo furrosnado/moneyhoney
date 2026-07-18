@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-<title>Sistema Financeiro — Bicho</title>
+<title>MoneyHoney</title>
 <script>
 /* aplica o tema salvo o quanto antes (antes do CSS/corpo), pra não piscar o tema errado por 1 frame —
    chave separada do localStorage principal (S/KEY): tema é preferência do NAVEGADOR, não dado do usuário */
@@ -780,7 +780,7 @@ function load(){
 }
 let S=load();
 function migrate(){ // defaults + migrações — roda no boot E após importar backup (dados antigos podem não ter esses campos)
-if(typeof S.subtitle!=='string')S.subtitle='CPF + ESTÚDIO BICHO · MENSAL';
+if(typeof S.subtitle!=='string')S.subtitle='ORÇAMENTO MENSAL';
 if(!Array.isArray(S.savings))S.savings=[]; // caixinhas de poupança (reserva sobre o saldo)
 if(typeof S.lastBackup!=='number')S.lastBackup=Date.now(); // âncora do lembrete de backup
 if(!Array.isArray(S.categories))S.categories=['Mercado','Delivery','Transporte','Casa','Assinaturas','Trabalho','Lazer','Saúde'];
@@ -1628,7 +1628,7 @@ function renderMes(){
         <input class="ginput gval" id="nt_val" inputmode="numeric" placeholder="0,00">
         <button class="addbtn" data-act="taddgo">+</button>
       </div>
-      <div class="note">Move dinheiro entre contas sem mudar o total. Ex.: aporte Bicho → CPF, ou o pró-labore.</div>
+      <div class="note">Move dinheiro entre contas sem mudar o total. Ex.: da Conta corrente pra Carteira.</div>
     </div>`:''}
   </div>
   <button class="ghost" data-act="addacc">＋ Nova conta</button>`;
