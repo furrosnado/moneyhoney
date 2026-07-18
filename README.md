@@ -4,7 +4,7 @@ Um app simples pra organizar suas finanças do mês: contas, cartões, dívidas,
 
 ## 👉 Como usar
 
-**Abra o app aqui:** https://SEU-USUARIO.github.io/financeiro/
+**Abra o app aqui:** https://furrosnado.github.io/moneyhoney/
 
 É só entrar e começar a usar — não precisa criar conta, instalar nada nem informar e-mail.
 
