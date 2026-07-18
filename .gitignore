@@ -1,0 +1,6 @@
+# Nunca versionar dados pessoais — os dados do app vivem no navegador de cada um.
+*-backup-*.json
+sistema-financeiro-backup-*.json
+*.xlsx
+.DS_Store
+Thumbs.db
