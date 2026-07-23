@@ -72,7 +72,7 @@
   :root[data-theme="claro"] table.mini th:first-child,:root[data-theme="claro"] table.mini td:first-child{background:#f9f8f6}
   :root[data-theme="claro"] .alert{border-color:rgba(143,96,9,.5)} /* borda é a única delimitação do alerta (sem fundo) — precisa aguentar o fundo claro */
   :root[data-theme="claro"] .alert.neg{border-color:rgba(199,59,46,.5)}
-  :root[data-theme="claro"] input[type=month].cxmonth{color-scheme:light} /* ícone do calendário + popup nativo acompanham o tema */
+  :root[data-theme="claro"] input[type=month].cxmonth,:root[data-theme="claro"] input[type=date].cxdate{color-scheme:light} /* ícone do calendário + popup nativo acompanham o tema */
   :root[data-theme="claro"] .tray button:hover{background:rgba(0,0,0,.06)} /* --cardhi no claro é #fff = sem feedback sobre bandeja branca */
   :root[data-theme="claro"] .tfrow .tfdir{background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 10'%3E%3Cpath d='M1 5 H12 M8.5 2 L12 5 L8.5 8' fill='none' stroke='%236e6e6e' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/13px no-repeat}
   :root[data-theme="claro"] select.tsel,:root[data-theme="claro"] select.catsel.dcat{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1.5 5 4.5 9 1.5' fill='none' stroke='%236e6e6e' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
@@ -475,6 +475,17 @@
   input[type=month].cxmonth{background:var(--sunk);border:1px solid transparent;border-radius:3px;color:var(--txt);
     font-family:inherit;font-size:12px;padding:5px 8px;outline:none;width:150px;color-scheme:dark}
   input[type=month].cxmonth:focus{border-color:var(--lime)}
+  /* lançamentos da caixinha: linha editável (direção + rótulo + data + valor + excluir) e botões da linha de adicionar */
+  input[type=date].cxdate{background:var(--sunk);border:1px solid transparent;border-radius:3px;color:var(--txt);
+    font-family:inherit;font-size:11px;padding:5px 6px;outline:none;flex:none;width:132px;color-scheme:dark}
+  input[type=date].cxdate:focus{border-color:var(--lime)}
+  .cxentrow{align-items:center}
+  .cxentrow .cxdate{width:120px}
+  .cxentrow input.val{width:76px;font-size:12px;padding:5px 6px;max-width:26vw}
+  .cxentdir{flex:none;width:20px;height:20px;border:none;border-radius:3px;cursor:pointer;font-family:inherit;font-size:14px;line-height:1;font-weight:600;padding:0}
+  .cxentdir.in{background:var(--postint);color:var(--acctxt)}
+  .cxentdir.out{background:var(--negtint);color:var(--acctxt)}
+  .addbtn.cxentout{background:var(--negtint)}
   .cxrecon{display:flex;gap:40px;flex-wrap:wrap;margin:10px 0 4px}
   .cxrecon .hitem b.free{font-size:26px}
   /* projetos — extrato e encerrados (o resto reusa o vocabulário das caixinhas: cxhead/cxbar/dl/cxmonth) */
@@ -669,6 +680,10 @@
     .kpis .hitem.khero b{font-size:26px}
     .kpis .hitem small{font-size:8px}
     .kfree{grid-column:1/-1;margin-left:0;text-align:left;transform:none} /* no mobile vira linha própria, alinhada à esquerda */
+    /* lançamento da caixinha: o type=date (largura fixa ~132px) não cabe com nome+valor+excluir numa linha só — quebra: nome na 1ª linha, direção+data+valor+excluir na 2ª */
+    .cxentrow{flex-wrap:wrap;row-gap:6px}
+    .cxentrow .iname{flex:1 1 100%;order:-1;min-width:0}
+    .cxentrow input.val{margin-left:auto}
   }
   @media(max-width:480px){
     body{padding:40px 14px 120px}
@@ -826,7 +841,19 @@ if(!Array.isArray(S.debts))S.debts=[];
     m.transfers=m.transfers.filter(t=>accIds0.has(t.from)&&accIds0.has(t.to)); // self-transfer legada NÃO é purgada: é no-op nos totais e pode ser histórico done/rec — os handlers (swap) só impedem criar novas
   }
   for(const d of S.debts){d.parcela=+d.parcela||0;d.total=Math.max(1,Math.round(+d.total||1));d.pagas=Math.min(d.total,Math.max(0,Math.round(+d.pagas||0)));}
-  for(const cx of S.savings){cx.balance=Math.max(0,+cx.balance||0);cx.target=Math.max(0,+cx.target||0);}
+  for(const cx of S.savings){
+    cx.target=Math.max(0,+cx.target||0);
+    if(!Array.isArray(cx.entries)){ // migração v2: o saldo escalar vira o 1º lançamento "Saldo inicial"; daqui pra frente o balance é DERIVADO
+      const b=Math.max(0,+cx.balance||0);
+      cx.entries=b>0?[{id:uid(),label:'Saldo inicial',val:b}]:[];
+    }
+    cx.entries=cx.entries.filter(e=>e&&typeof e==='object').map(e=>{ // sanitiza cada lançamento (val com sinal: + aporte, − resgate; dt = 'YYYY-MM-DD' opcional)
+      const o={id:e.id||uid(),label:(typeof e.label==='string'&&e.label.trim())?e.label:'lançamento',val:+e.val||0};
+      if(typeof e.dt==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(e.dt))o.dt=e.dt;
+      return o;
+    });
+    cx.balance=cx.entries.reduce((s,e)=>s+e.val,0); // balance = soma dos lançamentos (mantido em sync por cxRecalc a cada mutação)
+  }
   const HEX6=/^#[0-9a-fA-F]{6}$/; // cor precisa ser #rrggbb: brandChip concatena alpha '22' e a cor alimenta CSS inline
   for(const b of S.brands)if(!HEX6.test(b.color||''))b.color='#6fd0ff';
   for(const cx of S.savings)if(!HEX6.test(cx.color||''))cx.color='#7ee787';
@@ -1019,6 +1046,11 @@ function undoDelete(){
   if(d.kind==='plan'){ // linha de plano vive no projeto, não no mês
     const p=S.projects.find(x=>x.id===d.pjid);
     if(p)p.plan.splice(Math.min(d.idx,p.plan.length),0,d.obj);
+    save();render();return;
+  }
+  if(d.kind==='cxent'){ // lançamento vive na caixinha, não no mês
+    const c=S.savings.find(x=>x.id===d.cxid);
+    if(c){(c.entries||(c.entries=[])).splice(Math.min(d.idx,c.entries.length),0,d.obj);cxRecalc(c);}
     save();render();return;
   }
   const m=S.months[d.mk];if(!m)return;
@@ -2340,6 +2372,13 @@ function renderDividas(){
 }
 
 /* ============ caixinhas ============ */
+function cxRecalc(c){c.balance=(c.entries||[]).reduce((s,e)=>s+(+e.val||0),0);} // balance derivado dos lançamentos — chamar após toda mutação de entries
+function cxEntriesSorted(c){ // display: datados em ordem crescente, sem-data por último (ordem estável) — igual ao extrato de projetos
+  return (c.entries||[]).map((e,i)=>({e,i})).sort((a,b)=>{
+    if(a.e.dt&&b.e.dt)return a.e.dt<b.e.dt?-1:a.e.dt>b.e.dt?1:0;
+    if(a.e.dt)return -1;if(b.e.dt)return 1;return 0;
+  }).map(x=>x.e);
+}
 function renderCaixinhas(){
   const tk=todayKey();
   const curK=S.months[tk]?tk:monthKeys()[monthKeys().length-1];
@@ -2375,6 +2414,14 @@ function renderCaixinhas(){
         ?`<div class="cxpace">Guarde R$ ${fmt(falta/ml)}/mês pra chegar em ${mlabel(c.deadline)}.</div>`
         :`<div class="cxpace warn">Prazo (${mlabel(c.deadline)}) já chegou — faltam R$ ${fmt(falta)}.</div>`;
     }
+    const ents=cxEntriesSorted(c);
+    const entRow=e=>`<div class="pjxrow cxentrow" data-entid="${e.id}">
+      <button class="cxentdir ${e.val<0?'out':'in'}" data-act="cxentdir" title="${e.val<0?'resgate (retirada) — clique pra virar aporte':'aporte (guardado) — clique pra virar resgate'}">${e.val<0?'−':'+'}</button>
+      <input class="iname" data-act="cxentlabel" value="${esc(e.label)}" title="${esc(e.label)}">
+      <input type="date" class="cxdate" data-act="cxentdate" value="${e.dt||''}" title="data (opcional)">
+      <input class="val ${e.val<0?'pay':'recv'}" data-act="cxentval" inputmode="numeric" value="${fmt(Math.abs(e.val))}" data-raw="${Math.abs(e.val)}">
+      <button class="pjuntag" data-act="cxentdel" title="excluir lançamento">✕</button>
+    </div>`;
     return `<div class="card" data-cxid="${c.id}">
       <div class="cxhead">
         <input type="color" class="cxcolor" data-act="cxcolor" value="${esc(c.color||'#7ee787')}" title="cor da caixinha">
@@ -2382,13 +2429,22 @@ function renderCaixinhas(){
         <button class="accdel" data-act="cxdel" title="excluir caixinha">✕</button>
       </div>
       <div class="dl">
-        <div class="item"><small>Guardado</small><input class="val mini2" data-act="cxbal" inputmode="numeric" value="${fmtc(bal)}" data-raw="${bal}"></div>
+        <div class="item"><small>Guardado · soma dos lançamentos</small><b style="color:${bal<0?'var(--neg)':'var(--txt)'}">R$ ${fmt(bal)}</b></div>
         <div class="item"><small>Meta · 0 = sem meta</small><input class="val mini2" data-act="cxtarget" inputmode="numeric" value="${fmtc(tgt)}" data-raw="${tgt}"></div>
         <div class="item"><small>Prazo</small><input type="month" class="cxmonth" data-act="cxdeadline" value="${esc(c.deadline||'')}"></div>
       </div>
       ${tgt>0?`<div class="cxbar"><div class="cxfill" style="width:${pct}%;background:${esc(themeSafeColor(c.color||'#7ee787'))}"></div></div>
       <div class="cxstat"><span>R$ ${fmt(bal)} de R$ ${fmt(tgt)}</span><b>${Math.round(pct)}%</b></div>`:''}
       ${done?'<div class="cxdone">✓ Meta atingida!</div>':pace}
+      <div class="sec-label" style="margin-top:16px"><span>LANÇAMENTOS</span>${ents.length?`<span class="gsub">${ents.length}</span>`:''}</div>
+      ${ents.length?`<div class="bars dashscroll" style="margin-top:2px">${ents.map(entRow).join('')}</div>`:'<div class="empty">Nenhum lançamento ainda — registre um aporte abaixo.</div>'}
+      <div class="addrow cxentaddrow">
+        <input class="ginput grow" data-role="cxe_label" placeholder="Lançamento (ex: Salário de janeiro)">
+        <input class="ginput gval" data-role="cxe_val" inputmode="numeric" placeholder="0,00">
+        <input type="date" class="ginput cxdate" data-role="cxe_date" title="data (opcional)">
+        <button class="addbtn" data-act="cxentadd" data-dir="in" title="aporte — guardar">＋</button>
+        <button class="addbtn cxentout" data-act="cxentadd" data-dir="out" title="resgate — retirar">−</button>
+      </div>
     </div>`;
   }).join('')||'<div class="empty">Nenhuma caixinha ainda — crie a primeira abaixo.</div>'}
   </div>
@@ -2398,7 +2454,7 @@ function renderCaixinhas(){
       <input class="ginput grow" id="cx_name" placeholder="Nome (ex: Viagem, Notebook, Emergência)">
       <button class="addbtn" data-act="cxadd">+</button>
     </div>
-    <div class="note">Depois de criar, preencha quanto já tem guardado, a meta (opcional) e um prazo (opcional). Com meta + prazo, o app calcula quanto guardar por mês.</div>
+    <div class="note">Depois de criar, registre os aportes como lançamentos (o "Guardado" é a soma deles) e, se quiser, defina meta e prazo. Com meta + prazo, o app calcula quanto guardar por mês.</div>
   </div>`;
 }
 
@@ -3229,6 +3285,27 @@ view.addEventListener('click',e=>{
     S.savings=S.savings.filter(x=>x.id!==cxDelEl.dataset.cxid);
     save();render();return;
   }
+  if(act==='cxentadd'&&cxDelEl){ // lançamento avulso: aporte (data-dir=in, +) ou resgate (out, −); "Guardado" recalculado como soma
+    const c=S.savings.find(x=>x.id===cxDelEl.dataset.cxid);if(!c)return;
+    const li=cxDelEl.querySelector('[data-role="cxe_label"]'),vi=cxDelEl.querySelector('[data-role="cxe_val"]'),di=cxDelEl.querySelector('[data-role="cxe_date"]');
+    const mag=Math.max(0,mask(vi.value));if(!mag){vi.focus();return;}
+    const dir=b.dataset.dir==='out'?-1:1;
+    const ent={id:uid(),label:(li.value||'').trim()||(dir<0?'resgate':'aporte'),val:mag*dir};
+    if(di&&di.value&&/^\d{4}-\d{2}-\d{2}$/.test(di.value))ent.dt=di.value;
+    (c.entries||(c.entries=[])).push(ent);cxRecalc(c);save();render();return;
+  }
+  if(act==='cxentdir'&&cxDelEl){ // vira aporte↔resgate (inverte o sinal do lançamento)
+    const c=S.savings.find(x=>x.id===cxDelEl.dataset.cxid);const entEl=e.target.closest('[data-entid]');if(!c||!entEl)return;
+    const ent=(c.entries||[]).find(x=>x.id===entEl.dataset.entid);if(!ent)return;
+    ent.val=-ent.val;cxRecalc(c);save();render();return;
+  }
+  if(act==='cxentdel'&&cxDelEl){
+    const c=S.savings.find(x=>x.id===cxDelEl.dataset.cxid);const entEl=e.target.closest('[data-entid]');if(!c||!entEl)return;
+    const ix=(c.entries||[]).findIndex(x=>x.id===entEl.dataset.entid);if(ix<0)return;
+    lastDeleted={kind:'cxent',cxid:c.id,idx:ix,obj:c.entries[ix]};
+    undoToast(`"${c.entries[ix].label}" excluído`);
+    c.entries.splice(ix,1);cxRecalc(c);save();render();return;
+  }
   /* projetos */
   if(act==='pjadd'){
     const inp=document.getElementById('pj_name');const n=(inp.value||'').trim();
@@ -3405,9 +3482,15 @@ view.addEventListener('input',e=>{
   }
   if(act==='dparcela'&&wrap){const d=S.debts.find(x=>x.id===wrap.dataset.id);d.parcela=mask(el.value);el.value=fmt(d.parcela);el.dataset.raw=d.parcela;save();return;}
   const cxEl=el.closest('[data-cxid]');
-  if((act==='cxbal'||act==='cxtarget')&&cxEl){
+  if(act==='cxtarget'&&cxEl){
     const c=S.savings.find(x=>x.id===cxEl.dataset.cxid);
-    if(c){const v=Math.max(0,mask(el.value));el.value=fmt(v);el.dataset.raw=v;if(act==='cxbal')c.balance=v;else c.target=v;save();}
+    if(c){const v=Math.max(0,mask(el.value));el.value=fmt(v);el.dataset.raw=v;c.target=v;save();}
+    return;
+  }
+  if(act==='cxentval'&&cxEl){ // edita a MAGNITUDE do lançamento, preservando o sinal (aporte/resgate); "Guardado" recalcula
+    const c=S.savings.find(x=>x.id===cxEl.dataset.cxid),entEl=el.closest('[data-entid]');
+    const ent=entEl?(c.entries||[]).find(x=>x.id===entEl.dataset.entid):null;
+    if(ent){const mag=Math.max(0,mask(el.value));el.value=fmt(mag);el.dataset.raw=mag;ent.val=(ent.val<0?-1:1)*mag;cxRecalc(c);save();}
     return;
   }
   const pjEl=el.closest('[data-pjid]');
@@ -3498,7 +3581,9 @@ view.addEventListener('change',e=>{
     if(act==='cxname'){c.name=el.value.trim()||'caixinha';save();render();return;}
     if(act==='cxcolor'){c.color=el.value;save();render();return;}
     if(act==='cxdeadline'){c.deadline=el.value||null;save();render();return;}
-    if(act==='cxbal'||act==='cxtarget'){render();return;} // recalcula barra/livre/ritmo ao sair do campo
+    if(act==='cxentlabel'){const entEl=el.closest('[data-entid]');const ent=entEl?(c.entries||[]).find(x=>x.id===entEl.dataset.entid):null;if(ent)ent.label=el.value.trim()||'lançamento';save();return;}
+    if(act==='cxentdate'){const entEl=el.closest('[data-entid]');const ent=entEl?(c.entries||[]).find(x=>x.id===entEl.dataset.entid):null;if(ent){if(el.value&&/^\d{4}-\d{2}-\d{2}$/.test(el.value))ent.dt=el.value;else delete ent.dt;}save();render();return;} // re-render reordena a lista pela data
+    if(act==='cxtarget'){render();return;} // recalcula barra/livre/ritmo ao sair do campo
   }
   const pjEl2=el.closest('[data-pjid]');
   if(pjEl2){
@@ -3520,6 +3605,8 @@ view.addEventListener('keydown',e=>{
   if(gEl){gEl.querySelector('[data-act="iadd"]').click();return;}
   if(e.target.closest('#qd_row')){const btn=document.querySelector('[data-act="dquickadd"]');if(btn)btn.click();return;}
   if(e.target.closest('#cx_row')){const btn=document.querySelector('[data-act="cxadd"]');if(btn)btn.click();return;}
+  const cxc=e.target.closest('[data-cxid]');
+  if(cxc&&e.target.closest('.cxentaddrow')){const btn=cxc.querySelector('[data-act="cxentadd"][data-dir="in"]');if(btn)btn.click();return;} // Enter na linha de lançamento = aporte
   if(e.target.closest('#pj_row')){const btn=document.querySelector('[data-act="pjadd"]');if(btn)btn.click();return;}
   const pjc=e.target.closest('[data-pjid]');
   if(pjc&&e.target.closest('.addrow')){const btn=pjc.querySelector('[data-act="pjpadd"]');if(btn)btn.click();return;}
