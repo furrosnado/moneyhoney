@@ -1619,7 +1619,11 @@ function renderTabs(){
   const cur=document.getElementById('curtab'); // pílula da aba atual, só usada no celular (ver media query)
   if(cur){const at=TABS.find(([k])=>k===S.tab);cur.textContent=at?at[1]:'';}
 }
-function render(){closeCeTray(true);closeItemTray(true);closeSpTray();closeTabsTray();ensureHorizon();renderTabs();view.dataset.tab=S.tab; // marca a aba p/ CSS escopado (ex.: centro ótico dos ghosts fora do Mês)
+// preserva a posição das listas roláveis (data-scrollkey) através do render() — sem isso, o innerHTML novo
+// zera o scrollTop e a lista pula pro topo ao adicionar item ou marcar um check (bug relatado nos gastos avulsos)
+function snapshotScroll(){const m={};view.querySelectorAll('[data-scrollkey]').forEach(el=>{if(el.scrollTop>0)m[el.dataset.scrollkey]=el.scrollTop;});return m;}
+function restoreScroll(m){for(const k in m){const el=view.querySelector(`[data-scrollkey="${k}"]`);if(el){const max=el.scrollHeight-el.clientHeight;el.scrollTop=Math.min(m[k],max);}}} // clampa: a lista pode ter encolhido (item excluído)
+function render(){const scrollSnap=snapshotScroll();closeCeTray(true);closeItemTray(true);closeSpTray();closeTabsTray();ensureHorizon();renderTabs();view.dataset.tab=S.tab; // marca a aba p/ CSS escopado (ex.: centro ótico dos ghosts fora do Mês)
   if(S.tab==='mes')renderMes();
   else if(S.tab==='cartoes')renderCartoes();
   else if(S.tab==='dash')renderDash();
@@ -1627,6 +1631,7 @@ function render(){closeCeTray(true);closeItemTray(true);closeSpTray();closeTabsT
   else if(S.tab==='caixinhas')renderCaixinhas();
   else if(S.tab==='projetos')renderProjetos();
   else renderBackup();
+  restoreScroll(scrollSnap);
 }
 
 function negcls(n){return n<0?' class="negnum"':'';}
@@ -1714,7 +1719,7 @@ function accCard(mk,a,c){
         <span class="gsub" id="g_${g.id}"></span>
         <button class="gdel" data-act="gdel" title="remover grupo">✕</button>
       </div>
-      ${col?'':`<div class="gitems ${its.length>8?'scroll':''}">
+      ${col?'':`<div class="gitems ${its.length>8?'scroll':''}" data-scrollkey="mes:${g.id}">
       ${its.map(it=>itemRow(it,g)).join('')||''}
       </div>
       <div class="addrow" data-gid="${g.id}">
@@ -1813,7 +1818,7 @@ function renderCartoes(){
         ${S.brands.map(b=>brandChip(b,card.brand===b.id,'card_brand')).join('')}
       </div>
       <div class="sec-label"><span>GASTOS DO MÊS</span><span class="gsub" style="color:${av<0?'var(--pos)':'var(--neg)'}">${av<0?'+ ':'− '}${fmt(Math.abs(av))}</span></div>
-      <div class="gitems ${exps.length>8?'scroll':''}">
+      <div class="gitems ${exps.length>8?'scroll':''}" data-scrollkey="card:${card.id}">
       ${exps.map(e=>`<div class="row it" data-id="${e.id}">
         ${e.proj?projBar(projById(e.proj)):''}
         ${e.rec?'<span class="rowflag" title="recorrente" aria-hidden="true">↻</span>':''}
@@ -2437,7 +2442,7 @@ function renderCaixinhas(){
       <div class="cxstat"><span>R$ ${fmt(bal)} de R$ ${fmt(tgt)}</span><b>${Math.round(pct)}%</b></div>`:''}
       ${done?'<div class="cxdone">✓ Meta atingida!</div>':pace}
       <div class="sec-label" style="margin-top:16px"><span>LANÇAMENTOS</span>${ents.length?`<span class="gsub">${ents.length}</span>`:''}</div>
-      ${ents.length?`<div class="bars dashscroll" style="margin-top:2px">${ents.map(entRow).join('')}</div>`:'<div class="empty">Nenhum lançamento ainda — registre um aporte abaixo.</div>'}
+      ${ents.length?`<div class="bars dashscroll" style="margin-top:2px" data-scrollkey="cx:${c.id}">${ents.map(entRow).join('')}</div>`:'<div class="empty">Nenhum lançamento ainda — registre um aporte abaixo.</div>'}
       <div class="addrow cxentaddrow">
         <input class="ginput grow" data-role="cxe_label" placeholder="Lançamento (ex: Salário de janeiro)">
         <input class="ginput gval" data-role="cxe_val" inputmode="numeric" placeholder="0,00">
