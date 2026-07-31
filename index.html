@@ -1543,6 +1543,45 @@ function stopRecurring(mk,id){
   }
   save();render();
 }
+// marcar recorrente PROPAGA pra frente nos meses JÁ existentes — spawnMonth só clona no momento da criação, então
+// ligar a flag depois que os meses seguintes já existem não os alcançava (bug: recorrente de julho não aparecia em agosto+).
+function startRecurring(mk,it){
+  const m=S.months[mk],g0=m.groups.find(x=>x.id===it.g);if(!g0)return;
+  const acc=g0.acc,gname=g0.name,label=it.label; // identidade cruza meses por conta+nome-do-grupo+label (mesma chave do stopRecurring)
+  for(const k of monthKeys()){
+    if(k<=mk)continue; // só o futuro; mês atual e passado ficam como estão
+    const mm=S.months[k],gg=mm.groups.find(x=>x.acc===acc&&x.name===gname);if(!gg)continue; // sem grupo equivalente nesse mês
+    const exist=mm.items.find(i=>i.g===gg.id&&i.label===label&&!i.cardId&&!i.debtId);
+    if(exist){exist.recurring=true;continue;} // já existe (ex.: clone de um spawn anterior): só garante a flag, não duplica
+    const clone={...it,id:uid(),g:gg.id,paid:false,recurring:true};
+    if(clone.proj){const p=projById(clone.proj);if(p&&p.end&&k>p.end)delete clone.proj;} // não herda vínculo de projeto encerrado (mesma lei do spawnMonth)
+    mm.items.push(clone);
+  }
+}
+function clearRecurringForward(mk,it){ // desmarca a flag nas cópias futuras (NÃO apaga — sem perda de dados); assim param de propagar pra meses novos
+  const m=S.months[mk],g0=m.groups.find(x=>x.id===it.g);if(!g0)return;
+  const acc=g0.acc,gname=g0.name,label=it.label;
+  for(const k of monthKeys()){
+    if(k<=mk)continue;
+    const mm=S.months[k];
+    for(const i of mm.items){if(i.cardId||i.debtId)continue;const gg=mm.groups.find(x=>x.id===i.g);
+      if(gg&&gg.acc===acc&&gg.name===gname&&i.label===label)i.recurring=false;}
+  }
+}
+// quantos recorrentes do mês mk AINDA não alcançaram algum mês futuro existente (ex.: marcados depois que o mês seguinte já existia).
+// Só conta onde o grupo equivalente existe no mês futuro (senão startRecurring não teria onde inserir e o aviso seria mentiroso).
+function recForwardGap(mk){
+  const m=S.months[mk],later=monthKeys().filter(k=>k>mk);if(!later.length)return 0;
+  let n=0;
+  for(const it of m.items){
+    if(it.cardId||it.debtId||!it.recurring)continue;
+    const g0=m.groups.find(x=>x.id===it.g);if(!g0)continue;
+    const missing=later.some(k=>{const mm=S.months[k],gg=mm.groups.find(x=>x.acc===g0.acc&&x.name===g0.name);
+      return gg&&!mm.items.some(i=>i.g===gg.id&&i.label===it.label&&!i.cardId&&!i.debtId);});
+    if(missing)n++;
+  }
+  return n;
+}
 
 /* ============ render ============ */
 const view=document.getElementById('view');
@@ -1645,6 +1684,8 @@ function renderMes(){
   if(freshBoot)alerts.push(`<div class="alert" style="border-color:var(--limeborder);color:var(--lime);display:flex;justify-content:space-between;align-items:center;gap:10px"><span>👋 Primeira vez neste navegador — isto é um modelo de exemplo, edite à vontade. Já usava em outro aparelho ou navegador? Seus dados continuam lá: abra por ele, ou importe seu backup na aba Ferramentas.</span><button class="ic" data-act="dismissfresh" title="entendi" style="opacity:.7;flex:none">✕</button></div>`);
   const bkDays=Math.floor((Date.now()-(S.lastBackup||0))/864e5);
   if(!freshBoot&&bkDays>35)alerts.push(`<div class="alert" data-act="gobackup" style="cursor:pointer" title="ir para a aba Ferramentas">💾 Há ${bkDays} dias sem backup — seus dados vivem só neste navegador. Toque aqui pra exportar um JSON.</div>`);
+  const recGap=recForwardGap(mk);
+  if(recGap)alerts.push(`<div class="alert" style="border-color:var(--limeborder);color:var(--lime);display:flex;justify-content:space-between;align-items:center;gap:10px"><span>↻ ${recGap} ${recGap===1?'item marcado como recorrente ainda não está':'itens marcados como recorrentes ainda não estão'} nos próximos meses (você marcou depois que eles já existiam).</span><button class="ghost" data-act="recprop" style="margin-top:0;flex:none" title="copiar esses recorrentes pros meses seguintes já criados">Propagar</button></div>`);
   for(const a of S.accounts){
     if(c.per[a.id].close<0)alerts.push(`<div class="alert neg">⚠ ${esc(a.name)} fecha negativa: R$ ${fmt(c.per[a.id].close)}</div>`);
   }
@@ -3119,6 +3160,11 @@ view.addEventListener('click',e=>{
   if(act==='mprev'&&ix>0){S.activeMonth=keys[ix-1];save();render();return;}
   if(act==='mnext'&&ix<keys.length-1){S.activeMonth=keys[ix+1];save();render();return;}
   if(act==='newmonth'){newMonth();return;}
+  if(act==='recprop'){ // propaga os recorrentes do mês atual pros meses seguintes já existentes (catch-up do aviso)
+    const mk=S.activeMonth,mm=S.months[mk];
+    for(const it of [...mm.items]){if(it.cardId||it.debtId||!it.recurring)continue;startRecurring(mk,it);}
+    save();render();return;
+  }
 
   if(act==='addacc'){
     const name=prompt('Nome da nova conta:');if(!name)return;
@@ -3177,7 +3223,9 @@ view.addEventListener('click',e=>{
   if(itEl){
     const id=itEl.dataset.id;
     if(act==='paid'){const it=findItem(id);it.paid=!it.paid;save();render();return;}
-    if(act==='rec'){const it=findItem(id);it.recurring=!it.recurring;save();render();return;}
+    if(act==='rec'){const it=findItem(id);it.recurring=!it.recurring;
+      if(it.recurring)startRecurring(S.activeMonth,it);else clearRecurringForward(S.activeMonth,it); // propaga/reverte nos meses já existentes
+      save();render();return;}
     if(act==='more'){itTrayId===id?closeItemTray():openItemTray(id,b);return;}
     if(act==='idel'){
       const it0=findItem(id);
