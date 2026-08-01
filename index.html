@@ -1547,10 +1547,12 @@ function stopRecurring(mk,id){
 // ligar a flag depois que os meses seguintes já existem não os alcançava (bug: recorrente de julho não aparecia em agosto+).
 function startRecurring(mk,it){
   const m=S.months[mk],g0=m.groups.find(x=>x.id===it.g);if(!g0)return;
-  const acc=g0.acc,gname=g0.name,label=it.label; // identidade cruza meses por conta+nome-do-grupo+label (mesma chave do stopRecurring)
+  const acc=g0.acc,gname=g0.name,gtype=g0.type,label=it.label; // identidade cruza meses por conta+nome-do-grupo+label (mesma chave do stopRecurring)
   for(const k of monthKeys()){
     if(k<=mk)continue; // só o futuro; mês atual e passado ficam como estão
-    const mm=S.months[k],gg=mm.groups.find(x=>x.acc===acc&&x.name===gname);if(!gg)continue; // sem grupo equivalente nesse mês
+    const mm=S.months[k];
+    let gg=mm.groups.find(x=>x.acc===acc&&x.name===gname);
+    if(!gg){gg={id:uid(),acc,name:gname,type:gtype};mm.groups.push(gg);} // mês com estrutura divergente (grupo criado só no mês de origem): cria o equivalente, como o spawnMonth faria
     const exist=mm.items.find(i=>i.g===gg.id&&i.label===label&&!i.cardId&&!i.debtId);
     if(exist){exist.recurring=true;continue;} // já existe (ex.: clone de um spawn anterior): só garante a flag, não duplica
     const clone={...it,id:uid(),g:gg.id,paid:false,recurring:true};
@@ -1569,7 +1571,7 @@ function clearRecurringForward(mk,it){ // desmarca a flag nas cópias futuras (N
   }
 }
 // quantos recorrentes do mês mk AINDA não alcançaram algum mês futuro existente (ex.: marcados depois que o mês seguinte já existia).
-// Só conta onde o grupo equivalente existe no mês futuro (senão startRecurring não teria onde inserir e o aviso seria mentiroso).
+// Conta tanto "grupo existe mas sem o item" quanto "grupo nem existe no mês futuro" — startRecurring cria o grupo se faltar.
 function recForwardGap(mk){
   const m=S.months[mk],later=monthKeys().filter(k=>k>mk);if(!later.length)return 0;
   let n=0;
@@ -1577,7 +1579,7 @@ function recForwardGap(mk){
     if(it.cardId||it.debtId||!it.recurring)continue;
     const g0=m.groups.find(x=>x.id===it.g);if(!g0)continue;
     const missing=later.some(k=>{const mm=S.months[k],gg=mm.groups.find(x=>x.acc===g0.acc&&x.name===g0.name);
-      return gg&&!mm.items.some(i=>i.g===gg.id&&i.label===it.label&&!i.cardId&&!i.debtId);});
+      return !gg||!mm.items.some(i=>i.g===gg.id&&i.label===it.label&&!i.cardId&&!i.debtId);});
     if(missing)n++;
   }
   return n;
