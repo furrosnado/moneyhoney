@@ -444,6 +444,11 @@
   .tile .tend{color:var(--dim);font-size:8px;letter-spacing:.5px;margin-top:5px;white-space:nowrap}
   .lastb{border:1px solid rgba(255,255,255,.22);color:var(--dim);background:rgba(255,255,255,.04);font-size:8px;
     letter-spacing:1.5px;padding:3px 10px;border-radius:3px;white-space:nowrap;flex:none}
+  /* selo do mês selecionado no card da dívida: mostra qual parcela cai no mês navegado */
+  .dmonth{display:inline-block;font-size:11px;letter-spacing:.3px;padding:5px 10px;border-radius:3px;margin-top:12px}
+  .dmonth.on{background:var(--limesoft);color:var(--lime)}
+  .dmonth.paid{background:var(--postint);color:var(--acctxt)}
+  .dmonth.pre,.dmonth.done{background:var(--sunk);color:var(--dim)}
   .libn{color:var(--lime);font-weight:600}
   .tiledetail{margin-top:14px;border:1px solid rgba(255,255,255,.06);border-radius:3px;padding:12px 14px;background:var(--sunk)}
   .tdhead{color:var(--lime);font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
@@ -2295,66 +2300,90 @@ function brandChip(b,selected,act){
 }
 function renderDividas(){
   const tk=todayKey();
-  const rem=d=>d.total-d.pagas;
-  const active=S.debts.filter(d=>rem(d)>0&&d.parcela>0);
+  const mk=S.activeMonth; // a aba acompanha o mês navegado (mesmo activeMonth do Mês/Cartões)
+  const off0=monthIdx(mk)-monthIdx(tk); // deslocamento do mês exibido em relação a hoje
+  const keys=monthKeys(),ix=keys.indexOf(mk);
+  const rem=d=>d.total-d.pagas; // parcelas restantes AS OF hoje (fato da dívida)
+  const active=S.debts.filter(d=>rem(d)>0&&d.parcela>0); // ativas hoje — portfólio (não depende do mês)
   const restTotal=S.debts.reduce((s,d)=>s+rem(d)*d.parcela,0);
-  const commit=active.reduce((s,d)=>s+d.parcela,0);
+  // qual parcela de d cai no mês addM(mk,i): pagas+1 corre HOJE (=tk), então soma o offset. numAt(d,0)=parcela no mês exibido.
+  const numAt=(d,i)=>d.pagas+off0+i+1;
+  const dueAt=(d,i)=>d.parcela>0&&numAt(d,i)>=1&&numAt(d,i)<=d.total;
+  const dueList=S.debts.filter(d=>dueAt(d,0)); // parcelas que vencem no mês exibido
+  const commit=dueList.reduce((s,d)=>s+d.parcela,0);
+  const endsMk=S.debts.filter(d=>d.parcela>0&&numAt(d,0)===d.total).length; // encerram no mês exibido
 
-  // horizonte: do mês atual até a última parcela
-  const horizon=Math.max(6,...active.map(rem),1);
-  const mtot=[];for(let i=0;i<horizon;i++)mtot.push(active.reduce((s,d)=>s+(i<rem(d)?d.parcela:0),0));
+  // tiles: a partir do mês exibido, até a última parcela conhecida (cap 24)
+  const horizon=Math.min(24,Math.max(6,...S.debts.map(d=>d.parcela>0?(d.total-d.pagas-off0):0),1));
+  const mtot=[];for(let i=0;i<horizon;i++)mtot.push(S.debts.reduce((s,d)=>s+(dueAt(d,i)?d.parcela:0),0));
   const maxTot=Math.max(1,...mtot);
+  const endCountAt=i=>S.debts.filter(d=>d.parcela>0&&numAt(d,i)===d.total).length;
 
-  // por cartão
-  const byCard={};for(const d of S.debts){const k=d.card||'outros';byCard[k]=(byCard[k]||0)+rem(d)*d.parcela;}
+  // por cartão — parcelas do MÊS EXIBIDO
+  const byCard={};for(const d of dueList){const k=d.card||'outros';byCard[k]=(byCard[k]||0)+d.parcela;}
 
-  // encerramentos agrupados por mês (mês da última parcela)
+  // encerramentos: mês (absoluto) da última parcela de cada dívida ativa — fato fixo, não muda com a navegação
   const ends={};
   for(const d of active){const em=addM(tk,rem(d)-1);
     (ends[em]=ends[em]||{names:[],free:0,n:0});
     ends[em].names.push(d.name);ends[em].free+=d.parcela;ends[em].n++;}
   const endKeys=Object.keys(ends).sort();
-  const endsNow=active.filter(d=>rem(d)===1).length;
-  const endCountAt=i=>active.filter(d=>rem(d)-1===i).length;
 
-  // detalhe do mês selecionado
+  // detalhe do tile selecionado (relativo ao mês exibido)
   let detail='';
   if(selTile!=null&&selTile<horizon){
-    const list=active.filter(d=>selTile<rem(d));
+    const list=S.debts.filter(d=>dueAt(d,selTile));
     detail=`<div class="tiledetail">
-      <div class="tdhead">${mlabel(addM(tk,selTile))}</div>
+      <div class="tdhead">${mlabel(addM(mk,selTile))}</div>
       ${list.map(d=>`<div class="tdrow">
         <span class="tddot" style="background:${brandColor(d.card)}"></span>
         <span class="tdname">${esc(d.name)}</span>
-        <span class="tdn">${d.pagas+selTile+1}/${d.total}</span>
+        <span class="tdn">${numAt(d,selTile)}/${d.total}</span>
         <span class="tdv">R$ ${fmt(d.parcela)}</span>
       </div>`).join('')||'<div class="empty">Nada neste mês.</div>'}
     </div>`;
   }
 
   view.innerHTML=`
+  <div class="ctxrow">
+    <div class="mctrl">
+      <span class="mnav">
+        <button class="arrow" data-act="mprev" ${ix<=0?'disabled':''}>‹</button>
+        <span class="mlabel">${mlabel(mk)}</span>
+        <button class="arrow" data-act="mnext" ${ix>=keys.length-1?'disabled':''}>›</button>
+      </span>
+    </div>
+    <div class="sumitem main"><span class="sl-full">Compromisso · ${mlabel(mk)}</span><span class="sl-short">Compromisso do mês</span><b>R$ ${fmt(commit)}</b></div>
+  </div>
   <div class="card full" style="margin-bottom:24px">
     <div class="chead"><span style="color:var(--lime);font-size:13px;letter-spacing:2px">PANORAMA DAS DÍVIDAS</span>${qm('tabdiv')}</div>
-    ${note('tabdiv','A projeção assume que a próxima parcela não paga cai no mês atual e as demais nos meses seguintes. Dívida de cartão entra no orçamento pela fatura (marque a bandeira); as outras, use "lançar parcela no orçamento" — o item aparece automático nos meses ativos e some quando quita. Marque as bolinhas quando o mês virar; o ✓ do item no mês controla o realizado.')}
+    ${note('tabdiv','A aba acompanha o mês selecionado no ‹ topo ›: "parcela X/Y" e o compromisso mostram o que vence no mês exibido (a parcela atual corre no mês real de hoje e vai avançando mês a mês). "Total restante" e "termina em" são fatos da dívida inteira (não mudam com a navegação). Dívida de cartão entra no orçamento pela fatura (marque a bandeira); as outras, use "lançar parcela no orçamento". As bolinhas e os campos editam a dívida em TODOS os meses.')}
     <div class="heroline">
       <div class="hitem"><small>Total restante</small><b class="hbig">R$ ${fmt(restTotal)}</b></div>
-      <div class="hitem"><small>Compromisso deste mês</small><b>R$ ${fmt(commit)}</b></div>
-      <div class="hitem"><small>Ativas</small><b>${active.length}</b></div>
-      <div class="hitem"><small>Encerram este mês</small><b style="color:${endsNow>0?'var(--lime)':'var(--txt)'}">${endsNow}</b></div>
+      <div class="hitem"><small>Compromisso · ${mshort(mk)}</small><b>R$ ${fmt(commit)}</b></div>
+      <div class="hitem"><small>Ativas (hoje)</small><b>${active.length}</b></div>
+      <div class="hitem"><small>Encerram em ${mshort(mk)}</small><b style="color:${endsMk>0?'var(--lime)':'var(--txt)'}">${endsMk}</b></div>
     </div>
     <div class="cardsum">
       ${Object.keys(byCard).filter(k=>byCard[k]>0).map(k=>{
         const l=k==='outros'?'OUTROS':esc(String(brandName(k)).toUpperCase());
         return `<div class="csitem" style="border-color:${brandColor(k)}">
           <small style="color:${brandColor(k)}">${l}</small><b>R$ ${fmt(byCard[k])}</b></div>`;
-      }).join('')||'<div class="empty">Sem dívidas ativas.</div>'}
+      }).join('')||`<div class="empty">Nenhuma parcela vence em ${mlabel(mk)}.</div>`}
     </div>
 
-    <div class="sec-label" style="border-top:1px solid var(--line)"><span>COMPROMISSO POR MÊS</span><span class="gsub">toque num mês pra ver o detalhe</span></div>
+    <div class="sec-label" style="border-top:1px solid var(--line)"><span>PARCELAS DE ${mlabel(mk).toUpperCase()}</span><span class="gsub">${dueList.length?dueList.length+' parcela'+(dueList.length>1?'s':''):'nenhuma'}</span></div>
+    ${dueList.length?dueList.map(d=>`<div class="librow">
+      <span class="tddot" style="background:${brandColor(d.card)}"></span>
+      <span class="libname">${esc(d.name)} <b class="libn">${numAt(d,0)}/${d.total}</b>${numAt(d,0)<=d.pagas?' <span style="color:var(--pos);font-size:10px">paga</span>':''}</span>
+      <span class="libv">R$ ${fmt(d.parcela)}</span>
+    </div>`).join(''):`<div class="empty">Nenhuma parcela vence em ${mlabel(mk)}.</div>`}
+
+    <div class="sec-label" style="border-top:1px solid var(--line)"><span>COMPROMISSO POR MÊS</span><span class="gsub">a partir de ${mshort(mk)} · toque pra ver o detalhe</span></div>
     <div class="tiles">
       ${mtot.map((t,i)=>{const ec=endCountAt(i);
       return `<div class="tile ${selTile===i?'on':''} ${t===0?'zero':''}" data-act="dtile" data-ix="${i}">
-        <div class="tm">${mshort(addM(tk,i))}</div>
+        <div class="tm">${mshort(addM(mk,i))}</div>
         <div class="tv">R$ ${fmt0(t)}</div>
         <div class="tbar"><div class="tfill" style="width:${t/maxTot*100}%"></div></div>
         ${ec>0?`<div class="tend">◉ ${ec} encerra${ec>1?'m':''}</div>`:''}
@@ -2370,16 +2399,22 @@ function renderDividas(){
     </div>`).join(''):'<div class="empty">Nada encerrando — sem dívidas ativas.</div>'}
   </div>
 
-  ${S.debts.map(d=>`
+  ${S.debts.map(d=>{const n=numAt(d,0);
+   const badge=d.parcela<=0||d.total<=0?''
+     :n<1?`<div class="dmonth pre">Sem parcela em ${mshort(mk)} — começa depois</div>`
+     :n>d.total?`<div class="dmonth done">Já quitada em ${mshort(mk)}</div>`
+     :`<div class="dmonth ${n<=d.pagas?'paid':'on'}">${mlabel(mk)}: parcela ${n}/${d.total} · R$ ${fmt(d.parcela)}${n<=d.pagas?' · paga':''}</div>`;
+   return `
   <div class="divida" data-id="${d.id}">
     <div class="chead">
       <input class="accname" style="color:var(--dim)" data-act="dname" value="${esc(d.name)}">
       ${rem(d)===1&&d.parcela>0?'<span class="lastb">ÚLTIMA PARCELA</span>':''}
       <button class="ic del" data-act="ddel">✕</button>
     </div>
+    ${badge}
     <div class="dl">
       <div class="item"><small>Valor parcela</small><input class="val mini2" data-act="dparcela" inputmode="numeric" value="${fmtc(d.parcela)}" data-raw="${d.parcela}"></div>
-      <div class="item"><small>Atual</small><input class="val mini3" data-act="datual" inputmode="numeric" value="${rem(d)>0?d.pagas+1:d.total}"></div>
+      <div class="item"><small>Atual (hoje)</small><input class="val mini3" data-act="datual" inputmode="numeric" value="${rem(d)>0?d.pagas+1:d.total}"></div>
       <div class="item"><small>Total parcelas</small><input class="val mini3" data-act="dtotal" inputmode="numeric" value="${d.total}"></div>
       ${rem(d)>0?`<div class="item"><small>Termina em</small><b style="font-size:13px">${mshort(addM(tk,rem(d)-1))}</b></div>`:`<div class="item"><small>Situação</small><b style="font-size:13px;color:var(--lime)">✓ quitada</b></div>`}
     </div>
@@ -2407,7 +2442,7 @@ function renderDividas(){
         :`<select class="catsel dcat" data-act="dlink_acc">${S.accounts.map(a=>`<option value="${a.id}" ${d.account===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select>
           <button class="ghost" data-act="dlink" style="margin-top:0">Lançar parcela no orçamento</button>`}
     </div>
-  </div>`).join('')}
+  </div>`;}).join('')}
   <div class="card full" id="qd_row" style="margin-top:24px">
     <div class="chead"><span style="color:var(--lime);font-size:13px;letter-spacing:2px">NOVA DÍVIDA / PARCELAMENTO</span></div>
     <div class="addrow">
