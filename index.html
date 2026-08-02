@@ -1560,15 +1560,17 @@ function startRecurring(mk,it){
     mm.items.push(clone);
   }
 }
-function clearRecurringForward(mk,it){ // desmarca a flag nas cópias futuras (NÃO apaga — sem perda de dados); assim param de propagar pra meses novos
-  const m=S.months[mk],g0=m.groups.find(x=>x.id===it.g);if(!g0)return;
+// desmarcar recorrente: APAGA as cópias dos meses seguintes (mês atual e anteriores ficam intactos). Confirma quando há o que apagar.
+// Retorna false só se o usuário cancelar o confirm (aí o chamador mantém a flag ligada).
+function stopRecurringForward(mk,it){
+  const m=S.months[mk],g0=m.groups.find(x=>x.id===it.g);if(!g0)return true;
   const acc=g0.acc,gname=g0.name,label=it.label;
-  for(const k of monthKeys()){
-    if(k<=mk)continue;
-    const mm=S.months[k];
-    for(const i of mm.items){if(i.cardId||i.debtId)continue;const gg=mm.groups.find(x=>x.id===i.g);
-      if(gg&&gg.acc===acc&&gg.name===gname&&i.label===label)i.recurring=false;}
-  }
+  const later=monthKeys().filter(k=>k>mk);
+  const match=(mm,i)=>{if(i.cardId||i.debtId)return false;const gg=mm.groups.find(x=>x.id===i.g);return gg&&gg.acc===acc&&gg.name===gname&&i.label===label;};
+  let count=0;for(const k of later){const mm=S.months[k];count+=mm.items.filter(i=>match(mm,i)).length;}
+  if(count>0&&!confirm(`Desmarcar "${label}" como recorrente também remove as ${count} cópias dos meses seguintes.\n\nEste mês e os anteriores não mudam. Continuar?`))return false;
+  for(const k of later){const mm=S.months[k];mm.items=mm.items.filter(i=>!match(mm,i));}
+  return true;
 }
 // quantos recorrentes do mês mk AINDA não alcançaram algum mês futuro existente (ex.: marcados depois que o mês seguinte já existia).
 // Conta tanto "grupo existe mas sem o item" quanto "grupo nem existe no mês futuro" — startRecurring cria o grupo se faltar.
@@ -3225,8 +3227,11 @@ view.addEventListener('click',e=>{
   if(itEl){
     const id=itEl.dataset.id;
     if(act==='paid'){const it=findItem(id);it.paid=!it.paid;save();render();return;}
-    if(act==='rec'){const it=findItem(id);it.recurring=!it.recurring;
-      if(it.recurring)startRecurring(S.activeMonth,it);else clearRecurringForward(S.activeMonth,it); // propaga/reverte nos meses já existentes
+    if(act==='rec'){const it=findItem(id);if(!it)return;
+      if(it.recurring){ // desligar: apaga as cópias dos meses seguintes (confirma se houver); cancelar mantém tudo
+        if(!stopRecurringForward(S.activeMonth,it))return;
+        it.recurring=false;
+      }else{it.recurring=true;startRecurring(S.activeMonth,it);} // ligar: propaga pra frente nos meses já existentes
       save();render();return;}
     if(act==='more'){itTrayId===id?closeItemTray():openItemTray(id,b);return;}
     if(act==='idel'){
@@ -3234,7 +3239,8 @@ view.addEventListener('click',e=>{
       if(it0&&it0.debtId){
         const d=S.debts.find(x=>x.id===it0.debtId);
         if(d){if(!confirm(`Este item é a parcela automática de "${d.name}". Excluir aqui desliga o lançamento dela no orçamento (em todos os meses). Continuar?`))return;
-          d.budget=false;for(const k of monthKeys())syncDebtItems(k);save();render();return;}
+          d.budget=false;for(const k of monthKeys())S.months[k].items=S.months[k].items.filter(i=>i.debtId!==d.id); // remoção explícita: tira de TODOS os meses, inclusive fechados
+          save();render();return;}
       }
       const ix=m.items.findIndex(i=>i.id===id);
       if(ix>=0){lastDeleted={kind:'item',mk:S.activeMonth,idx:ix,obj:m.items[ix]};undoToast(`"${m.items[ix].label}" excluído`);}
@@ -3257,8 +3263,11 @@ view.addEventListener('click',e=>{
         const sel=itEl.querySelector('[data-act="dlink_acc"]');
         d.account=(sel&&sel.value)||d.account||S.accounts[0].id;
         d.budget=true;
-      }else d.budget=false;
-      for(const k of monthKeys())syncDebtItems(k);
+        for(const k of monthKeys())syncDebtItems(k); // liga: sync respeita a trava (não lança em mês fechado)
+      }else{
+        d.budget=false;
+        for(const k of monthKeys())S.months[k].items=S.months[k].items.filter(i=>i.debtId!==d.id); // desliga = ação explícita: remove de TODOS os meses, inclusive fechados (a trava do syncDebtItems só vale pra mudança automática)
+      }
       save();render();return;
     }
     if(act==='dpill'){const d=S.debts.find(x=>x.id===id);const n=+b.dataset.n;d.pagas=(n===d.pagas)?n-1:n;save();render();return;}
