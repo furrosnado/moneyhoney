@@ -942,7 +942,11 @@ function cardGastos(mk,cid){return ce(mk).filter(e=>e.cardId===cid&&!e.est).redu
 function cardEstorno(mk,cid){return ce(mk).filter(e=>e.cardId===cid&&e.est).reduce((s,e)=>s+e.val,0);} // total estornado
 function cardParcelas(mk,card){
   if(!card.brand)return 0;
-  const i=monthIdx(mk)-monthIdx(todayKey());if(i<0)return 0;
+  const i=monthIdx(mk)-monthIdx(todayKey());
+  if(i<0){ // mês FECHADO: a parcela ficou congelada na fatura (fatura − avulsos). Não reprojeta (o modelo de dívida é relativo a hoje) — assim a aba Cartões bate com o item do Mês e com o saldo.
+    const it=S.months[mk]&&S.months[mk].items.find(x=>x.cardId===card.id);
+    return it?Math.max(0,it.val-cardAvulsos(mk,card.id)):0;
+  }
   return S.debts.filter(d=>d.card===card.brand&&d.parcela>0&&(d.total-d.pagas)>i).reduce((s,d)=>s+d.parcela,0);
 }
 function cardFatura(mk,card){return cardAvulsos(mk,card.id)+cardParcelas(mk,card);}
