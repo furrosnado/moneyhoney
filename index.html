@@ -62,7 +62,7 @@
   :root[data-theme="claro"] select.tsel option,:root[data-theme="claro"] .catsel option,:root[data-theme="claro"] .tray.wide select option,:root[data-theme="claro"] .xlcustom select option{background:#fff;color:var(--txt)}
   :root[data-theme="claro"] select.tsel optgroup,:root[data-theme="claro"] .catsel optgroup,:root[data-theme="claro"] .tray.wide select optgroup{background:#fff;color:var(--dim)}
   /* claro (cont.): superfícies e ícones que eram escuros/pastéis POR DEFINIÇÃO (não bordas translúcidas) — pares claros */
-  :root[data-theme="claro"] #undotoast{background:#fff;box-shadow:0 3px 12px rgba(0,0,0,.18)} /* toast de desfazer: era caixa quase-preta; no claro vira branca (senão texto+botão somem) */
+  :root[data-theme="claro"] #undotoast,:root[data-theme="claro"] #flashmsg{background:#fff;box-shadow:0 3px 12px rgba(0,0,0,.18)} /* toast de desfazer: era caixa quase-preta; no claro vira branca (senão texto+botão somem) */
   :root[data-theme="claro"] #savewarn{background:#fff;border-color:rgba(199,59,46,.55);box-shadow:0 3px 12px rgba(0,0,0,.18)}
   :root[data-theme="claro"] .tscroll{background: /* coluna sticky + cortina de scroll da tabela detalhe-por-conta: opaco = cor do card claro */
     linear-gradient(90deg,#f9f8f6 40%,rgba(249,248,246,0)) left/20px 100% no-repeat local,
@@ -557,6 +557,11 @@
   #undotoast .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #undotoast button{background:none;border:none;color:var(--lime);font-family:inherit;font-size:11px;flex:none;
     cursor:pointer;letter-spacing:1px;text-transform:uppercase;font-weight:600}
+  #flashmsg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%) translateY(80px);z-index:97;
+    background:rgba(12,12,12,.95);border:1px solid var(--line);color:var(--txt);
+    font-size:12px;padding:11px 16px;border-radius:3px;opacity:0;transition:.2s;pointer-events:none;
+    max-width:92vw;letter-spacing:.3px}
+  #flashmsg.show{transform:translateX(-50%) translateY(0);opacity:1}
   .rowflag{color:var(--lime);font-size:11px;line-height:1;flex:none;align-self:center;opacity:1}
   .traybtn{background:none;border:none;color:var(--dim);cursor:pointer;font-family:inherit;font-size:13px;
     line-height:1;width:16px;flex:none;opacity:.55;padding:0;transition:.15s}
@@ -1029,7 +1034,44 @@ function showSaveWarn(on){
   w.textContent='⚠ Não consegui salvar neste navegador (modo anônimo ou armazenamento bloqueado). Seus lançamentos vão se perder ao fechar — exporte um backup ou abra em outro navegador.';
   document.body.appendChild(w);
 }
+// ===== desfazer/refazer global (Ctrl+Z) — histórico de snapshots do estado inteiro, em memória (não persiste entre reloads) =====
+let undoStack=[],redoStack=[],lastSnapTs=0,suppressSnap=false;
+const SNAP_WINDOW=400; // ms: edições rápidas (digitação) coalescem num único passo de desfazer
+function pushUndoSnapshot(){ // roda no INÍCIO do save(): captura o estado que está no localStorage AGORA (= pré-mutação)
+  if(suppressSnap)return;
+  let prev=null;try{prev=localStorage.getItem(KEY);}catch(e){}
+  if(prev==null)return; // boot: nada salvo ainda
+  const now=Date.now();
+  if(now-lastSnapTs<SNAP_WINDOW&&undoStack.length)return; // coalesce: já guardou o estado pré-rajada
+  lastSnapTs=now;
+  undoStack.push(prev);if(undoStack.length>40)undoStack.shift();
+  redoStack.length=0; // ação nova invalida o refazer
+}
+function applyRawState(raw){try{const s=JSON.parse(raw);if(!s||s.v!==1)return false;S=s;migrate();return true;}catch(e){return false;}}
+function flashMsg(txt){
+  let t=document.getElementById('flashmsg');
+  if(!t){t=document.createElement('div');t.id='flashmsg';document.body.appendChild(t);}
+  t.textContent=txt;t.classList.add('show');
+  clearTimeout(flashMsg._t);flashMsg._t=setTimeout(()=>t.classList.remove('show'),1400);
+}
+function undoAction(){
+  if(!undoStack.length){flashMsg('Nada pra desfazer');return;}
+  suppressSnap=true;
+  let cur=null;try{cur=localStorage.getItem(KEY);}catch(e){}
+  const raw=undoStack.pop();
+  if(applyRawState(raw)){if(cur!=null)redoStack.push(cur);save();render();flashMsg('Desfeito ↩');}
+  suppressSnap=false;
+}
+function redoAction(){
+  if(!redoStack.length){flashMsg('Nada pra refazer');return;}
+  suppressSnap=true;
+  let cur=null;try{cur=localStorage.getItem(KEY);}catch(e){}
+  const raw=redoStack.pop();
+  if(applyRawState(raw)){if(cur!=null)undoStack.push(cur);save();render();flashMsg('Refeito ↪');}
+  suppressSnap=false;
+}
 const save=()=>{
+  pushUndoSnapshot();
   try{localStorage.setItem(KEY,JSON.stringify(S));if(saveFailed){saveFailed=false;showSaveWarn(false);}}
   catch(e){if(!saveFailed){saveFailed=true;showSaveWarn(true);}}
 };
@@ -3720,6 +3762,18 @@ view.addEventListener('keydown',e=>{
 window.addEventListener('storage',e=>{ // outra aba deste arquivo gravou: adota o estado dela em vez de sobrescrever depois
   if(e.key!==KEY||!e.newValue)return;
   try{const s=JSON.parse(e.newValue);if(s&&s.v===1){S=s;migrate();render();}}catch(_){}
+});
+
+/* Ctrl+Z / ⌘Z desfaz a última ação em qualquer aba; Ctrl+Shift+Z ou Ctrl+Y refaz.
+   Em campo de texto/número o undo NATIVO do navegador tem prioridade (não sequestra a digitação). */
+window.addEventListener('keydown',e=>{
+  if(!(e.ctrlKey||e.metaKey)||e.altKey)return;
+  const k=e.key.toLowerCase();
+  if(k!=='z'&&k!=='y')return;
+  const t=e.target,tag=t&&t.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return; // deixa o undo nativo do campo
+  e.preventDefault();
+  if(k==='y'||(k==='z'&&e.shiftKey))redoAction();else undoAction();
 });
 
 save();render();
