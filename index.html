@@ -2296,6 +2296,7 @@ function renderDash(){
 
 /* ============ dívidas ============ */
 let selTile=null;
+let dividasShowDone=false; // seção "já quitadas" (do mês exibido) expandida — volátil por sessão
 function accName(id){const a=S.accounts.find(x=>x.id===id);return a?a.name:'?';}
 function askNewCat(){const n=(prompt('Nome da nova categoria:')||'').trim();if(n&&!S.categories.includes(n))S.categories.push(n);return n||null;}
 function askNewProj(){ // criação inline de projeto (pickers do Mês e Cartões); start alcança o mês ativo se for passado
@@ -2390,6 +2391,55 @@ function renderDividas(){
     </div>`;
   }
 
+  // card editável de uma dívida (mesmo template de sempre; extraído pra dividir a lista em ativas-no-mês e já quitadas)
+  const debtCard=d=>{const n=numAt(d,0);
+   const badge=d.parcela<=0||d.total<=0?''
+     :n<1?`<div class="dmonth pre">Sem parcela em ${mshort(mk)} — começa depois</div>`
+     :n>d.total?`<div class="dmonth done">Já quitada em ${mshort(mk)}</div>`
+     :`<div class="dmonth ${n<=d.pagas?'paid':'on'}">${mlabel(mk)}: parcela ${n}/${d.total} · R$ ${fmt(d.parcela)}${n<=d.pagas?' · paga':''}</div>`;
+   return `
+  <div class="divida" data-id="${d.id}">
+    <div class="chead">
+      <input class="accname" style="color:var(--dim)" data-act="dname" value="${esc(d.name)}">
+      ${rem(d)===1&&d.parcela>0?'<span class="lastb">ÚLTIMA PARCELA</span>':''}
+      <button class="ic del" data-act="ddel">✕</button>
+    </div>
+    ${badge}
+    <div class="dl">
+      <div class="item"><small>Valor parcela</small><input class="val mini2" data-act="dparcela" inputmode="numeric" value="${fmtc(d.parcela)}" data-raw="${d.parcela}"></div>
+      <div class="item"><small>Atual (hoje)</small><input class="val mini3" data-act="datual" inputmode="numeric" value="${rem(d)>0?d.pagas+1:d.total}"></div>
+      <div class="item"><small>Total parcelas</small><input class="val mini3" data-act="dtotal" inputmode="numeric" value="${d.total}"></div>
+      ${rem(d)>0?`<div class="item"><small>Termina em</small><b style="font-size:13px">${mshort(addM(tk,rem(d)-1))}</b></div>`:`<div class="item"><small>Situação</small><b style="font-size:13px;color:var(--lime)">✓ quitada</b></div>`}
+    </div>
+    <div class="pill">${Array.from({length:d.total},(_,i)=>`<div class="dot ${i<d.pagas?'paid':''}" data-act="dpill" data-n="${i+1}">${i+1}</div>`).join('')}</div>
+    <div class="dfoot">
+      <div class="dl">
+        <div class="item"><small>Total da dívida</small><b>R$ ${fmt(d.total*d.parcela)}</b></div>
+        <div class="item"><small>Pago</small><b>R$ ${fmt(d.pagas*d.parcela)}</b></div>
+        <div class="item"><small>Restante</small><b style="color:var(--neg)">R$ ${fmt(rem(d)*d.parcela)}</b></div>
+      </div>
+      <div class="cardchips">
+        <select class="catsel dcat" data-act="dcat">
+          <option value="">— Sem categoria</option>
+          ${S.categories.map(c=>`<option value="${esc(c)}" ${d.cat===c?'selected':''}>${esc(c)}</option>`).join('')}
+          ${d.cat&&!S.categories.includes(d.cat)?`<option value="${esc(d.cat)}" selected>${esc(d.cat)}</option>`:''}
+          <option value="__new">＋ Nova categoria…</option>
+        </select>
+        ${S.brands.map(b=>brandChip(b,d.card===b.id,'dcard')).join('')}
+      </div>
+    </div>
+    <div class="linkrow">
+      ${d.budget
+        ?`<span class="linkstate">✓ parcela no orçamento · sai de "${esc((S.accounts.find(a=>a.id===d.account)||{}).name||'?')}" enquanto ativa</span>
+          <button class="ghost" data-act="dlink" style="margin-top:0">Desligar</button>`
+        :`<select class="catsel dcat" data-act="dlink_acc">${S.accounts.map(a=>`<option value="${a.id}" ${d.account===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select>
+          <button class="ghost" data-act="dlink" style="margin-top:0">Lançar parcela no orçamento</button>`}
+    </div>
+  </div>`;};
+  // "já quitada até o mês exibido" = a parcela que cairia em mk já passou do total (dívida terminou antes de mk)
+  const doneMk=d=>d.parcela>0&&d.total>0&&numAt(d,0)>d.total;
+  const mainDebts=S.debts.filter(d=>!doneMk(d)),doneDebts=S.debts.filter(doneMk);
+
   view.innerHTML=`
   <div class="ctxrow">
     <div class="mctrl">
@@ -2445,50 +2495,10 @@ function renderDividas(){
     </div>`).join(''):'<div class="empty">Nada encerrando — sem dívidas ativas.</div>'}
   </div>
 
-  ${S.debts.map(d=>{const n=numAt(d,0);
-   const badge=d.parcela<=0||d.total<=0?''
-     :n<1?`<div class="dmonth pre">Sem parcela em ${mshort(mk)} — começa depois</div>`
-     :n>d.total?`<div class="dmonth done">Já quitada em ${mshort(mk)}</div>`
-     :`<div class="dmonth ${n<=d.pagas?'paid':'on'}">${mlabel(mk)}: parcela ${n}/${d.total} · R$ ${fmt(d.parcela)}${n<=d.pagas?' · paga':''}</div>`;
-   return `
-  <div class="divida" data-id="${d.id}">
-    <div class="chead">
-      <input class="accname" style="color:var(--dim)" data-act="dname" value="${esc(d.name)}">
-      ${rem(d)===1&&d.parcela>0?'<span class="lastb">ÚLTIMA PARCELA</span>':''}
-      <button class="ic del" data-act="ddel">✕</button>
-    </div>
-    ${badge}
-    <div class="dl">
-      <div class="item"><small>Valor parcela</small><input class="val mini2" data-act="dparcela" inputmode="numeric" value="${fmtc(d.parcela)}" data-raw="${d.parcela}"></div>
-      <div class="item"><small>Atual (hoje)</small><input class="val mini3" data-act="datual" inputmode="numeric" value="${rem(d)>0?d.pagas+1:d.total}"></div>
-      <div class="item"><small>Total parcelas</small><input class="val mini3" data-act="dtotal" inputmode="numeric" value="${d.total}"></div>
-      ${rem(d)>0?`<div class="item"><small>Termina em</small><b style="font-size:13px">${mshort(addM(tk,rem(d)-1))}</b></div>`:`<div class="item"><small>Situação</small><b style="font-size:13px;color:var(--lime)">✓ quitada</b></div>`}
-    </div>
-    <div class="pill">${Array.from({length:d.total},(_,i)=>`<div class="dot ${i<d.pagas?'paid':''}" data-act="dpill" data-n="${i+1}">${i+1}</div>`).join('')}</div>
-    <div class="dfoot">
-      <div class="dl">
-        <div class="item"><small>Total da dívida</small><b>R$ ${fmt(d.total*d.parcela)}</b></div>
-        <div class="item"><small>Pago</small><b>R$ ${fmt(d.pagas*d.parcela)}</b></div>
-        <div class="item"><small>Restante</small><b style="color:var(--neg)">R$ ${fmt(rem(d)*d.parcela)}</b></div>
-      </div>
-      <div class="cardchips">
-        <select class="catsel dcat" data-act="dcat">
-          <option value="">— Sem categoria</option>
-          ${S.categories.map(c=>`<option value="${esc(c)}" ${d.cat===c?'selected':''}>${esc(c)}</option>`).join('')}
-          ${d.cat&&!S.categories.includes(d.cat)?`<option value="${esc(d.cat)}" selected>${esc(d.cat)}</option>`:''}
-          <option value="__new">＋ Nova categoria…</option>
-        </select>
-        ${S.brands.map(b=>brandChip(b,d.card===b.id,'dcard')).join('')}
-      </div>
-    </div>
-    <div class="linkrow">
-      ${d.budget
-        ?`<span class="linkstate">✓ parcela no orçamento · sai de "${esc((S.accounts.find(a=>a.id===d.account)||{}).name||'?')}" enquanto ativa</span>
-          <button class="ghost" data-act="dlink" style="margin-top:0">Desligar</button>`
-        :`<select class="catsel dcat" data-act="dlink_acc">${S.accounts.map(a=>`<option value="${a.id}" ${d.account===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select>
-          <button class="ghost" data-act="dlink" style="margin-top:0">Lançar parcela no orçamento</button>`}
-    </div>
-  </div>`;}).join('')}
+  ${mainDebts.map(debtCard).join('')}
+  ${doneDebts.length?`
+  <div class="sec-label" style="cursor:pointer;margin-top:8px" data-act="divdone"><span>✓ JÁ QUITADAS ATÉ ${mshort(mk).toUpperCase()} · ${doneDebts.length}</span><button class="chev">${dividasShowDone?'▾':'▸'}</button></div>
+  ${dividasShowDone?doneDebts.map(debtCard).join(''):''}`:''}
   <div class="card full" id="qd_row" style="margin-top:24px">
     <div class="chead"><span style="color:var(--lime);font-size:13px;letter-spacing:2px">NOVA DÍVIDA / PARCELAMENTO</span></div>
     <div class="addrow">
@@ -3415,6 +3425,7 @@ view.addEventListener('click',e=>{
     S.debts.push({id:uid(),name,parcela:val,total,pagas});save();render();return;
   }
   if(act==='dtile'){const ix=+b.dataset.ix;selTile=(selTile===ix)?null:ix;render();return;}
+  if(act==='divdone'){dividasShowDone=!dividasShowDone;render();return;}
   /* caixinhas */
   if(act==='cxadd'){
     const inp=document.getElementById('cx_name');const n=(inp.value||'').trim();
