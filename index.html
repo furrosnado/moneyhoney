@@ -1660,14 +1660,17 @@ function stopRecurringCardForward(mk,x){ // desmarcar: apaga as cópias futuras 
   for(const k of later){const m=S.months[k];if(m.cardExp){m.cardExp=m.cardExp.filter(z=>!match(z));syncCardItems(k);}}
   return true;
 }
-function recForwardGapCard(mk){ // quantos gastos de cartão recorrentes de mk ainda não alcançaram algum mês futuro
-  const later=monthKeys().filter(k=>k>mk&&monthIdx(k)>=monthIdx(todayKey()));if(!later.length)return 0;
-  let n=0;
-  for(const x of (S.months[mk].cardExp||[])){
-    if(!x.rec||x.est)continue;
-    if(later.some(k=>!(S.months[k].cardExp||[]).some(z=>z.cardId===x.cardId&&z.label===x.label&&!z.est)))n++;
+function recForwardGapCard(){ // quantos gastos de cartão recorrentes (em QUALQUER mês) ainda não alcançaram algum mês futuro.
+  // Escaneia todos os meses (não só o exibido) — o aviso não depende de você estar no mês onde marcou. Dedup por cartão+label.
+  const keys=monthKeys(),gap=new Set();
+  for(const mk of keys){
+    const later=keys.filter(k=>k>mk&&monthIdx(k)>=monthIdx(todayKey()));if(!later.length)continue;
+    for(const x of (S.months[mk].cardExp||[])){
+      if(!x.rec||x.est)continue;
+      if(later.some(k=>!(S.months[k].cardExp||[]).some(z=>z.cardId===x.cardId&&z.label===x.label&&!z.est)))gap.add(x.cardId+'|'+x.label);
+    }
   }
-  return n;
+  return gap.size;
 }
 
 /* ============ render ============ */
@@ -1922,7 +1925,7 @@ function updateTotals(){
 function renderCartoes(){
   const mk=S.activeMonth; // sync já feito pelo ensureHorizon do render
   const keys=monthKeys(),ix=keys.indexOf(mk);
-  const recGapCard=recForwardGapCard(mk);
+  const recGapCard=recForwardGapCard();
   view.innerHTML=`
   <div class="ctxrow">
     <div class="mctrl">
@@ -3294,9 +3297,10 @@ view.addEventListener('click',e=>{
     for(const it of [...mm.items]){if(it.cardId||it.debtId||!it.recurring)continue;startRecurring(mk,it);}
     save();render();return;
   }
-  if(act==='recpropcard'){ // idem, pros gastos de cartão recorrentes do mês exibido
-    const mk=S.activeMonth;
-    for(const x of [...(S.months[mk].cardExp||[])]){if(!x.rec||x.est)continue;startRecurringCard(mk,x);}
+  if(act==='recpropcard'){ // propaga os gastos de cartão recorrentes de TODOS os meses pros seguintes (não só o exibido)
+    for(const mk of monthKeys()){
+      for(const x of [...(S.months[mk].cardExp||[])]){if(!x.rec||x.est)continue;startRecurringCard(mk,x);}
+    }
     save();render();return;
   }
 
